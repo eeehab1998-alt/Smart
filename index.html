@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Cart - نظام السلال الذكية</title>
+    <title>Smart Cart - مدرسة روّاد الغد النموذجية أريحا</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -13,18 +13,18 @@
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         body { font-family: 'Cairo', sans-serif; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%); }
-        .glass-card { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.6); }
+        .glass-card { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.8); }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        .gradient-bg { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #60a5fa 100%); }
-        .gradient-btn { background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%); transition: all 0.3s ease; }
-        .gradient-btn:hover { background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%); box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.4); }
-        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); } 70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-        .alert-pulse { animation: pulse-red 1.5s infinite; }
+        .gradient-bg { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #3b82f6 100%); }
+        .gradient-btn { background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%); transition: all 0.3s ease; }
+        .gradient-btn:hover { background: linear-gradient(90deg, #1d4ed8 0%, #1e40af 100%); box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.4); }
         .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #scanner-video { width: 100% !important; border-radius: 0.75rem; object-fit: cover; }
         #scanner-canvas { display: none; }
+        .product-card { transition: transform 0.2s, box-shadow 0.2s; }
+        .product-card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px -10px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body class="text-gray-800 min-h-screen">
@@ -33,81 +33,56 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const useDeviceDetect = () => {
-            const [deviceInfo, setDeviceInfo] = useState({ isMobile: false, isDesktop: false, isIOS: false, isAndroid: false, browser: "Unknown" });
-            useEffect(() => {
-                const ua = navigator.userAgent;
-                const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-                const isAndroid = /Android/.test(ua);
-                const isMobile = /Mobi|Mobile|Android|iPhone|iPad|iPod/.test(ua) || isIOS;
-                const isDesktop = !isMobile;
-                let browser = "Unknown";
-                if (/Chrome/.test(ua) && !/Edg/.test(ua) && !/OPR/.test(ua)) browser = "Google Chrome";
-                else if (/Safari/.test(ua) && !/Chrome/.test(ua)) browser = "Safari";
-                else if (/Firefox/.test(ua)) browser = "Firefox";
-                else if (/Edg/.test(ua)) browser = "Edge";
-                setDeviceInfo({ isMobile, isDesktop, isIOS, isAndroid, browser });
-            }, []);
-            return deviceInfo;
+        // دالة لضغط الصور المرفوعة لتصبح صغيرة الحجم ومناسبة للسحابة
+        const resizeImage = (file, maxSize, callback) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width, height = img.height;
+                    if (width > height) {
+                        if (width > maxSize) { height *= maxSize / width; width = maxSize; }
+                    } else {
+                        if (height > maxSize) { width *= maxSize / height; height = maxSize; }
+                    }
+                    canvas.width = width; canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    callback(canvas.toDataURL('image/jpeg', 0.8));
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
         };
 
+        // منتجات افتراضية مع صور من الإنترنت
         const initialProducts = {
-            "6281001010011": { name: "مياه معدنية 500ml", price: 2.5, weight: 500, category: "مشروبات" },
-            "6281001010028": { name: "عصير برتقال طبيعي", price: 6.0, weight: 1000, category: "مشروبات" },
-            "6281001010035": { name: "كوكا كولا", price: 5.0, weight: 330, category: "مشروبات" },
-            "6281001010042": { name: "بيبسي", price: 5.0, weight: 330, category: "مشروبات" },
-            "6281001010059": { name: "شاي مثلج", price: 4.5, weight: 400, category: "مشروبات" },
-            "6281001010066": { name: "قهوة سريعة التحضير", price: 8.0, weight: 200, category: "مشروبات" },
-            "6281001010073": { name: "مشروب طاقة", price: 10.0, weight: 250, category: "مشروبات" },
-            "6281001020011": { name: "فول مدمس", price: 3.0, weight: 400, category: "معلبات" },
-            "6281001020028": { name: "حمص", price: 3.5, weight: 400, category: "معلبات" },
-            "6281001020035": { name: "تونة بالماء", price: 7.0, weight: 150, category: "معلبات" },
-            "6281001020042": { name: "تونة بالزيت", price: 7.5, weight: 150, category: "معلبات" },
-            "6281001020059": { name: "ذرة حلوة", price: 4.0, weight: 300, category: "معلبات" },
-            "6281001020066": { name: "فطر مقطع", price: 5.0, weight: 300, category: "معلبات" },
-            "6281001020073": { name: "بازلاء خضراء", price: 4.0, weight: 300, category: "معلبات" },
-            "6281001020080": { name: "طماطم مقشرة", price: 4.5, weight: 400, category: "معلبات" },
-            "6281001030011": { name: "لوز نيء", price: 25.0, weight: 200, category: "مكسرات" },
-            "6281001030028": { name: "كاجو محمص", price: 30.0, weight: 200, category: "مكسرات" },
-            "6281001030035": { name: "فستق حلبي", price: 40.0, weight: 250, category: "مكسرات" },
-            "6281001030042": { name: "جوز", price: 22.0, weight: 200, category: "مكسرات" },
-            "6281001030059": { name: "بندق", price: 28.0, weight: 200, category: "مكسرات" },
-            "6281001030066": { name: "سوداني مملح", price: 10.0, weight: 300, category: "مكسرات" },
-            "6281001030073": { name: "مكسرات مشكلة", price: 35.0, weight: 250, category: "مكسرات" },
-            "6281001040011": { name: "شوكولاتة داكنة", price: 8.0, weight: 100, category: "حلويات" },
-            "6281001040028": { name: "شوكولاتة بالحليب", price: 7.5, weight: 100, category: "حلويات" },
-            "6281001040035": { name: "بسكويت شاي", price: 4.0, weight: 200, category: "حلويات" },
-            "6281001040042": { name: "ويفر شوكولاتة", price: 3.5, weight: 100, category: "حلويات" },
-            "6281001040059": { name: "علكة نعناع", price: 2.0, weight: 50, category: "حلويات" },
-            "6281001040066": { name: "مصاصة فواكه", price: 3.0, weight: 100, category: "حلويات" },
-            "6281001040073": { name: "كعكة محشوة", price: 12.0, weight: 300, category: "حلويات" },
-            "6281001050011": { name: "حليب كامل الدسم", price: 6.5, weight: 1000, category: "ألبان" },
-            "6281001050028": { name: "حليب قليل الدسم", price: 6.5, weight: 1000, category: "ألبان" },
-            "6281001050035": { name: "جبنة بيضاء", price: 15.0, weight: 500, category: "ألبان" },
-            "6281001050042": { name: "لبنة", price: 10.0, weight: 500, category: "ألبان" },
-            "6281001050059": { name: "زبادي طبيعي", price: 4.0, weight: 150, category: "ألبان" },
-            "6281001050066": { name: "بيض طبق 30", price: 25.0, weight: 1500, category: "ألبان" },
-            "6281001060011": { name: "صابون غسيل", price: 8.0, weight: 400, category: "منظفات" },
-            "6281001060028": { name: "شامبو", price: 15.0, weight: 400, category: "منظفات" },
-            "6281001060035": { name: "معجون أسنان", price: 10.0, weight: 100, category: "منظفات" },
-            "6281001060042": { name: "ورق مرحاض", price: 20.0, weight: 800, category: "منظفات" },
-            "6281001060059": { name: "سائل جلي", price: 12.0, weight: 1000, category: "منظفات" }
+            "6281001010011": { name: "مياه معدنية 500ml", price: 2.5, category: "مشروبات", image: "https://images.unsplash.com/photo-1560887961-9ba4b6d5d242?w=200&q=80" },
+            "6281001010028": { name: "عصير برتقال", price: 6.0, category: "مشروبات", image: "https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=200&q=80" },
+            "6281001010035": { name: "كوكا كولا", price: 5.0, category: "مشروبات", image: "https://images.unsplash.com/photo-1554866585-cd94860890b7?w=200&q=80" },
+            "6281001020035": { name: "تونة بالماء", price: 7.0, category: "معلبات", image: "https://images.unsplash.com/photo-1599487488170-d11ec9c172f0?w=200&q=80" },
+            "6281001020011": { name: "فول مدمس", price: 3.0, category: "معلبات", image: "https://images.unsplash.com/photo-1541529086526-db283c563270?w=200&q=80" },
+            "6281001030028": { name: "كاجو محمص", price: 30.0, category: "مكسرات", image: "https://images.unsplash.com/photo-1535920726617-6f9c9b3c3c3c?w=200&q=80" },
+            "6281001030011": { name: "لوز نيء", price: 25.0, category: "مكسرات", image: "https://images.unsplash.com/photo-1508743625643-3d3d3d3d3d3d?w=200&q=80" },
+            "6281001040011": { name: "شوكولاتة داكنة", price: 8.0, category: "حلويات", image: "https://images.unsplash.com/photo-1546171753-97d7676e4602?w=200&q=80" },
+            "6281001050011": { name: "حليب كامل الدسم", price: 6.5, category: "ألبان", image: "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=200&q=80" },
+            "6281001060011": { name: "صابون غسيل", price: 8.0, category: "منظفات", image: "https://images.unsplash.com/photo-1584559582841-66b4d0c3d3d3?w=200&q=80" }
         };
 
         const initialDB = {
             malls: { 
-                "MALL001": { 
-                    name: "المول الافتراضي", password: "1234", currency: "شيكل", id: "MALL001", 
+                "JERICHO001": { 
+                    name: "سوبر ماركت روّاد الغد", password: "1234", currency: "شيكل", id: "JERICHO001", 
                     categories: ["مشروبات", "معلبات", "مكسرات", "حلويات", "ألبان", "منظفات"],
                     products: initialProducts
                 } 
             },
             transactions: [],
-            cart: { items: [], actualWeight: 0, buyer: null, status: 'active' }
+            cart: { items: [], buyer: null, paid: false, exitCode: null, auditRequired: false }
         };
 
         const App = () => {
-            const deviceInfo = useDeviceDetect();
             const [view, setView] = useState('home');
             const [session, setSession] = useState(null);
             const [isSynced, setIsSynced] = useState(false);
@@ -116,7 +91,7 @@
             
             const clientRef = useRef(null);
             const dbRef = useRef(cloudDB);
-            const DB_TOPIC = "smart_cart_cloud_v6";
+            const DB_TOPIC = "smart_cart_jericho_final_v2";
 
             useEffect(() => { dbRef.current = cloudDB; }, [cloudDB]);
 
@@ -188,19 +163,20 @@
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center gradient-bg text-white">
                         <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full loader mb-4"></div>
-                        <h2 className="text-xl font-bold">Smart Cart</h2>
-                        <p className="text-blue-100">جاري الاتصال بالخادم السحابي...</p>
+                        <h2 className="text-2xl font-bold">Smart Cart</h2>
+                        <p className="text-blue-100 mt-2">مدرسة روّاد الغد النموذجية - أريحا</p>
+                        <p className="text-blue-200 text-sm mt-4">جاري الاتصال بالخادم السحابي...</p>
                     </div>
                 );
             }
 
             if (view === 'home') return <HomeScreen setView={setView} isOnline={isOnline} />;
-            if (view === 'buyerEntry') return <BuyerEntryScreen setView={setView} startSession={startSession} malls={cloudDB.malls} deviceInfo={deviceInfo} />;
+            if (view === 'buyerEntry') return <BuyerEntryScreen setView={setView} startSession={startSession} malls={cloudDB.malls} />;
             if (view === 'staffLogin') return <StaffLoginScreen setView={setView} startSession={startSession} malls={cloudDB.malls} />;
             if (view === 'register') return <RegisterScreen onBack={() => setView('staffLogin')} malls={cloudDB.malls} updateCloudDB={updateCloudDB} cloudDB={cloudDB} />;
 
             if (view === 'app' && session) {
-                const mallInfo = cloudDB.malls[session.mallId] || { name: 'مول غير معروف', currency: 'شيكل', products: {}, categories: [] };
+                const mallInfo = cloudDB.malls[session.mallId] || { name: 'متجر غير معروف', currency: 'شيكل', products: {}, categories: [] };
 
                 return (
                     <div className="min-h-screen flex flex-col">
@@ -212,21 +188,11 @@
                                 <div>
                                     <h1 className="font-extrabold text-lg leading-tight">Smart Cart - {mallInfo.name}</h1>
                                     <p className="text-xs text-blue-100">
-                                        {session.type === 'buyer' ? `مرحباً ${session.buyerName}` : session.role === 'cashier' ? 'شاشة الكاشير' : 'لوحة تحكم المالك'}
+                                        {session.type === 'buyer' ? `مرحباً ${session.buyerName}` : session.role === 'cashier' ? 'بوابة الأمن والخروج' : 'لوحة تحكم المالك'}
                                     </p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-4">
-                                <div className="hidden md:flex items-center gap-2 text-xs text-blue-100 bg-white/10 px-3 py-1 rounded-full">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        {deviceInfo.isMobile ? (
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a1 1 0 001-1V4a1 1 0 00-1-1H8a1 1 0 00-1 1v16a1 1 0 001 1z"></path>
-                                        ) : (
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                        )}
-                                    </svg>
-                                    {deviceInfo.isMobile ? `${deviceInfo.isIOS ? 'iOS' : deviceInfo.isAndroid ? 'Android' : 'موبايل'} - ${deviceInfo.browser}` : `كمبيوتر - ${deviceInfo.browser}`}
-                                </div>
                                 <div className={`flex items-center gap-2 text-xs font-bold ${isOnline ? 'text-green-300' : 'text-red-300'}`}>
                                     <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-300' : 'bg-red-300'}`}></span>
                                     {isOnline ? 'متصل' : 'غير متصل'}
@@ -236,10 +202,14 @@
                         </header>
 
                         <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
-                            {session.type === 'buyer' && <CartView mallInfo={mallInfo} cartData={cloudDB.cart} updateCart={updateCart} deviceInfo={deviceInfo} />}
-                            {session.type === 'staff' && session.role === 'cashier' && <CashierView mallInfo={mallInfo} cartData={cloudDB.cart} updateCart={updateCart} cloudDB={cloudDB} updateCloudDB={updateCloudDB} />}
+                            {session.type === 'buyer' && <CartView mallInfo={mallInfo} cartData={cloudDB.cart} updateCart={updateCart} />}
+                            {session.type === 'staff' && session.role === 'cashier' && <SecurityView mallInfo={mallInfo} cloudDB={cloudDB} updateCart={updateCart} updateCloudDB={updateCloudDB} />}
                             {session.type === 'staff' && session.role === 'owner' && <OwnerDashboard mallInfo={mallInfo} cloudDB={cloudDB} updateMallData={updateMallData} />}
                         </main>
+                        
+                        <footer className="text-center py-4 text-xs text-gray-400 border-t border-gray-100 mt-8">
+                            مشروع تخرج - مدرسة روّاد الغد النموذجية - أريحا © 2024
+                        </footer>
                     </div>
                 );
             }
@@ -249,37 +219,37 @@
         const HomeScreen = ({ setView, isOnline }) => (
             <div className="min-h-screen flex flex-col items-center justify-center gradient-bg p-4 text-center">
                 <div className="bg-white/10 backdrop-blur-md p-10 rounded-3xl border border-white/20 max-w-lg w-full">
-                    <h1 className="text-4xl font-extrabold text-white mb-3">Smart Cart</h1>
-                    <p className="text-blue-100 mb-10">نظام السلال الذكية للمولات والأسواق التجارية</p>
+                    <div className="mb-6">
+                        <h1 className="text-5xl font-extrabold text-white tracking-tight">Smart Cart</h1>
+                        <p className="text-blue-200 mt-2 text-lg">امسح، ادفع، اخرج - تقنية المستقبل اليوم</p>
+                    </div>
+                    <div className="bg-white text-blue-800 py-2 px-4 rounded-full inline-block mb-8 text-sm font-bold">
+                        مدرسة روّاد الغد النموذجية - أريحا
+                    </div>
                     <div className="space-y-4">
-                        <button onClick={() => setView('buyerEntry')} className="w-full bg-white text-blue-800 py-4 rounded-xl font-extrabold text-lg hover:bg-blue-50 transition shadow-lg">
-                            أنا مشتري (الدخول للسلة)
+                        <button onClick={() => setView('buyerEntry')} className="w-full bg-white text-blue-800 py-4 rounded-xl font-extrabold text-lg hover:bg-blue-50 transition shadow-lg flex items-center justify-center gap-2">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                            أنا مشتري (ابدأ التسوق الذاتي)
                         </button>
                         <button onClick={() => setView('staffLogin')} className="w-full bg-blue-900/40 text-white border-2 border-white/30 py-4 rounded-xl font-bold text-lg hover:bg-blue-900/60 transition">
-                            إدارة المتجر (كاشير / مالك)
+                            إدارة المتجر (مالك / أمن)
                         </button>
-                    </div>
-                    <div className={`mt-6 text-sm font-bold ${isOnline ? 'text-green-300' : 'text-red-300'}`}>
-                        الحالة: {isOnline ? 'متصل بالخادم' : 'بانتظار الشبكة...'}
                     </div>
                 </div>
             </div>
         );
 
-        const BuyerEntryScreen = ({ setView, startSession, malls, deviceInfo }) => {
-            const [mallId, setMallId] = useState('');
+        const BuyerEntryScreen = ({ setView, startSession, malls }) => {
+            const [mallId, setMallId] = useState('JERICHO001');
             const [name, setName] = useState('');
             const [phone, setPhone] = useState('');
             const [error, setError] = useState('');
 
             const submit = (e) => {
                 e.preventDefault();
-                if (!malls[mallId.toUpperCase()]) { setError("رقم المتجر غير صحيح أو غير مسجل."); return; }
+                if (!malls[mallId.toUpperCase()]) { setError("رقم المتجر غير صحيح."); return; }
                 const phoneRegex = /^(056|059)\d{7}$/;
-                if (!phoneRegex.test(phone)) {
-                    setError("رقم الهاتف يجب أن يبدأ بـ 056 أو 059 ويتكون من 10 أرقام.");
-                    return;
-                }
+                if (!phoneRegex.test(phone)) { setError("رقم الهاتف يجب أن يبدأ بـ 056 أو 059."); return; }
                 startSession({ type: 'buyer', mallId: mallId.toUpperCase(), buyerName: name, buyerPhone: phone });
             };
 
@@ -287,14 +257,12 @@
                 <div className="min-h-screen flex items-center justify-center gradient-bg p-4">
                     <div className="glass-card rounded-3xl shadow-2xl p-8 w-full max-w-md">
                         <button onClick={() => setView('home')} className="text-blue-600 mb-4 text-sm font-bold">&larr; رجوع</button>
-                        <h2 className="text-2xl font-extrabold text-blue-900 mb-2">مرحباً بك في Smart Cart</h2>
-                        <p className="text-blue-500 mb-6 text-sm">
-                            جهازك: {deviceInfo.isMobile ? `${deviceInfo.isIOS ? 'آيفون' : deviceInfo.isAndroid ? 'أندرويد' : 'موبايل'} (${deviceInfo.browser})` : `كمبيوتر (${deviceInfo.browser})`}
-                        </p>
+                        <h2 className="text-2xl font-extrabold text-blue-900 mb-2">تسجيل دخول المشتري</h2>
+                        <p className="text-blue-500 mb-6 text-sm">أدخل بياناتك لربط سلتك بحسابك (نظام الحماية الرقمي)</p>
                         <form onSubmit={submit} className="space-y-4">
                             <div>
-                                <label className="block text-sm font-bold text-blue-800 mb-1">رقم تعريف المتجر (Mall ID)</label>
-                                <input type="text" value={mallId} onChange={e => setMallId(e.target.value)} className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="مثال: MALL001" required />
+                                <label className="block text-sm font-bold text-blue-800 mb-1">رقم تعريف المتجر</label>
+                                <input type="text" value={mallId} onChange={e => setMallId(e.target.value)} className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-blue-800 mb-1">الاسم الكامل</label>
@@ -313,9 +281,9 @@
         };
 
         const StaffLoginScreen = ({ setView, startSession, malls }) => {
-            const [mallId, setMallId] = useState('');
+            const [mallId, setMallId] = useState('JERICHO001');
             const [password, setPassword] = useState('');
-            const [role, setRole] = useState('cashier');
+            const [role, setRole] = useState('owner');
             const [error, setError] = useState('');
 
             const submit = (e) => {
@@ -331,15 +299,15 @@
                         <button onClick={() => setView('home')} className="text-blue-600 mb-4 text-sm font-bold">&larr; رجوع</button>
                         <h2 className="text-2xl font-extrabold text-blue-900 mb-6">دخول إدارة المتجر</h2>
                         <form onSubmit={submit} className="space-y-4">
-                            <input type="text" value={mallId} onChange={e => setMallId(e.target.value)} placeholder="رقم تعريف المتجر (Mall ID)" className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
-                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="كلمة السر" className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
+                            <input type="text" value={mallId} onChange={e => setMallId(e.target.value)} placeholder="رقم المتجر" className="w-full px-4 py-3 bg-blue-50 rounded-xl outline-none" required />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="كلمة السر" className="w-full px-4 py-3 bg-blue-50 rounded-xl outline-none" required />
                             <div className="grid grid-cols-2 gap-2">
-                                <button type="button" onClick={() => setRole('cashier')} className={`p-3 rounded-xl font-bold text-sm transition ${role === 'cashier' ? 'gradient-btn text-white' : 'bg-blue-50 text-blue-600'}`}>دخول كاشير</button>
-                                <button type="button" onClick={() => setRole('owner')} className={`p-3 rounded-xl font-bold text-sm transition ${role === 'owner' ? 'gradient-btn text-white' : 'bg-blue-50 text-blue-600'}`}>دخول مالك المتجر</button>
+                                <button type="button" onClick={() => setRole('cashier')} className={`p-3 rounded-xl font-bold text-sm ${role === 'cashier' ? 'gradient-btn text-white' : 'bg-blue-50 text-blue-600'}`}>بوابة الأمن</button>
+                                <button type="button" onClick={() => setRole('owner')} className={`p-3 rounded-xl font-bold text-sm ${role === 'owner' ? 'gradient-btn text-white' : 'bg-blue-50 text-blue-600'}`}>مالك المتجر</button>
                             </div>
                             {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{error}</div>}
-                            <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">تسجيل الدخول</button>
-                            <button type="button" onClick={() => setView('register')} className="w-full text-blue-600 text-sm py-2">متجر جديد؟ اشترك الآن</button>
+                            <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">دخول</button>
+                            <button type="button" onClick={() => setView('register')} className="w-full text-blue-600 text-sm py-2">متجر جديد؟ اشترك</button>
                         </form>
                     </div>
                 </div>
@@ -354,64 +322,50 @@
 
             const submit = (e) => {
                 e.preventDefault();
-                if (malls[id.toUpperCase()]) { alert("هذا الرقم التعريفي مسجل مسبقاً!"); return; }
+                if (malls[id.toUpperCase()]) { alert("مسجل مسبقاً!"); return; }
                 const newMall = { name, password: pass, currency: "شيكل", id: id.toUpperCase(), categories: ["عام"], products: {} };
-                const newMalls = { ...malls, [id.toUpperCase()]: newMall };
-                updateCloudDB({ ...cloudDB, malls: newMalls });
-                setDone(true);
-                setTimeout(onBack, 2000);
+                updateCloudDB({ ...cloudDB, malls: { ...malls, [id.toUpperCase()]: newMall } });
+                setDone(true); setTimeout(onBack, 2000);
             };
 
-            if (done) return <div className="min-h-screen flex items-center justify-center gradient-bg text-white text-2xl font-bold">تم تسجيل المتجر بنجاح في السحابة!</div>;
+            if (done) return <div className="min-h-screen flex items-center justify-center gradient-bg text-white text-2xl font-bold">تم التسجيل بنجاح!</div>;
 
             return (
                 <div className="min-h-screen flex items-center justify-center gradient-bg p-4">
                     <div className="glass-card rounded-3xl shadow-2xl p-8 w-full max-w-md">
-                        <h2 className="text-2xl font-extrabold text-blue-900 mb-6 text-center">تسجيل متجر تجاري جديد</h2>
+                        <h2 className="text-2xl font-extrabold text-blue-900 mb-6 text-center">تسجيل متجر جديد</h2>
                         <form onSubmit={submit} className="space-y-4">
-                            <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="اسم المتجر" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none border border-blue-100" required />
-                            <input type="text" value={id} onChange={e=>setId(e.target.value)} placeholder="رقم تعريف فريد (Mall ID)" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none border border-blue-100" required />
-                            <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="كلمة السر" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none border border-blue-100" required />
-                            <div className="bg-blue-50 p-3 rounded-xl text-sm text-blue-800">العملة الافتراضية: شيكل</div>
-                            <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">إنشاء حساب سحابي</button>
-                            <button type="button" onClick={onBack} className="w-full text-blue-600 text-sm py-2">العودة لتسجيل الدخول</button>
+                            <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="اسم المتجر" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none" required />
+                            <input type="text" value={id} onChange={e=>setId(e.target.value)} placeholder="رقم تعريف (Mall ID)" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none" required />
+                            <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="كلمة السر" className="w-full px-4 py-3 bg-white/80 rounded-xl outline-none" required />
+                            <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">إنشاء</button>
+                            <button type="button" onClick={onBack} className="w-full text-blue-600 text-sm py-2">رجوع</button>
                         </form>
                     </div>
                 </div>
             );
         };
 
-        const CartView = ({ mallInfo, cartData, updateCart, deviceInfo }) => {
+        // --- شاشة المشتري (Storefront + Cart) ---
+        const CartView = ({ mallInfo, cartData, updateCart }) => {
             const [showScanner, setShowScanner] = useState(false);
-            const [showManualSearch, setShowManualSearch] = useState(false);
-            const [searchQuery, setSearchQuery] = useState('');
             const [cameraError, setCameraError] = useState('');
+            const [activeCat, setActiveCat] = useState(mallInfo.categories[0] || "");
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const streamRef = useRef(null);
             const rafRef = useRef(null);
 
-            const expectedWeight = cartData.items.reduce((s, i) => s + i.weight * i.qty, 0);
             const totalPrice = cartData.items.reduce((s, i) => s + i.price * i.qty, 0);
-            const theftAlert = Math.abs(cartData.actualWeight - expectedWeight) > 15 && cartData.items.length > 0;
 
-            // دالة موحدة لإضافة المنتج للسلة (تستخدم للمسح والإضافة اليدوية)
-            const addProductToCart = (barcode) => {
+            const addProduct = (barcode) => {
                 const p = mallInfo.products[barcode];
-                if (!p) return;
+                if (!p) { alert("الباركود غير معروف"); return; }
                 const items = [...cartData.items];
                 const ex = items.find(i => i.barcode === barcode);
                 if (ex) ex.qty++; else items.push({ ...p, barcode, qty: 1 });
-                updateCart({ ...cartData, items, actualWeight: cartData.actualWeight + p.weight });
+                updateCart({ ...cartData, items });
                 if (navigator.vibrate) navigator.vibrate(100);
-            };
-
-            // دوال الكاميرا
-            const handleScanSuccess = (decoded) => {
-                const p = mallInfo.products[decoded];
-                if (!p) { alert("هذا الباركود غير مسجل في متجرنا!"); return; }
-                addProductToCart(decoded);
-                stopCamera();
             };
 
             const tick = () => {
@@ -419,15 +373,10 @@
                     const video = videoRef.current;
                     const canvas = canvasRef.current;
                     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
+                    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
-                    if (code) {
-                        handleScanSuccess(code.data);
-                        return;
-                    }
+                    const code = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, { inversionAttempts: "dontInvert" });
+                    if (code) { addProduct(code.data); stopCamera(); return; }
                 }
                 rafRef.current = requestAnimationFrame(tick);
             };
@@ -444,155 +393,141 @@
                         rafRef.current = requestAnimationFrame(tick);
                     }
                 } catch (err) {
-                    if (err.name === 'NotAllowedError') setCameraError("تم رفض إذن الكاميرا. اضغط على أيقونة القفل 🔒 بجانب رابط الموقع، واسمح بالكاميرا، ثم أعد التحميل.");
-                    else if (err.name === 'NotFoundError') setCameraError("لا توجد كاميرا متاحة في جهازك.");
-                    else if (err.name === 'NotReadableError') setCameraError("الكاميرا مستخدمة من قبل تطبيق آخر. يرجى إغلاق التطبيقات الأخرى.");
-                    else setCameraError("لا يمكن تشغيل الكاميرا. تأكد من فتح الموقع عبر HTTPS أو localhost.");
+                    setCameraError("تعذر الوصول للكاميرا. اسمح بالكاميرا من إعدادات المتصفح أو استخدم الإضافة اليدوية.");
                 }
             };
 
             const stopCamera = () => {
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
-                if (streamRef.current) {
-                    streamRef.current.getTracks().forEach(track => track.stop());
-                    streamRef.current = null;
-                }
+                if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
                 if (videoRef.current) videoRef.current.srcObject = null;
                 setShowScanner(false);
             };
 
             useEffect(() => {
-                if (showScanner) startCamera();
-                else stopCamera();
+                if (showScanner) startCamera(); else stopCamera();
                 return () => stopCamera();
             }, [showScanner]);
 
             const removeItem = (barcode) => {
-                const item = cartData.items.find(i => i.barcode === barcode);
-                if (!item) return;
-                updateCart({ ...cartData, items: cartData.items.filter(i => i.barcode !== barcode), actualWeight: cartData.actualWeight - (item.weight * item.qty) });
+                updateCart({ ...cartData, items: cartData.items.filter(i => i.barcode !== barcode) });
             };
 
-            const sendToCashier = () => {
-                updateCart({ ...cartData, status: 'checkout' });
-                alert("تم إرسال سلتك إلى الكاشير! يرجى التوجه لبوابة الدفع.");
+            const processPayment = () => {
+                alert("جاري معالجة الدفع عبر البطاقة الائتمانية...");
+                setTimeout(() => {
+                    const exitCode = Math.floor(100000 + Math.random() * 900000);
+                    const auditRequired = Math.random() < 0.2;
+                    updateCart({ ...cartData, paid: true, exitCode, auditRequired });
+                    if (auditRequired) alert("تنبيه: تم اختيار سلتك للتدقيق الأمني. توجه لبوابة الأمن.");
+                    else alert("تم الدفع بنجاح! يمكنك الخروج مباشرة.");
+                }, 1500);
             };
 
-            // فلترة المنتجات للبحث اليدوي
-            const filteredManualProducts = Object.keys(mallInfo.products).filter(barcode => {
-                return mallInfo.products[barcode].name.includes(searchQuery) || searchQuery === '';
-            });
-
-            return (
-                <div className="max-w-3xl mx-auto">
-                    <div className={`glass-card rounded-3xl shadow-xl p-6 border-t-4 ${theftAlert ? 'border-red-500 alert-pulse' : 'border-blue-500'}`}>
-                        {theftAlert && <div className="bg-red-50 text-red-700 p-3 mb-4 rounded-xl font-bold flex items-center gap-2 border border-red-200"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg> تنبيه: عدم تطابق في الوزن!</div>}
-                        
-                        {deviceInfo.isDesktop && (
-                            <div className="bg-amber-50 text-amber-800 p-3 mb-4 rounded-xl text-sm flex items-center gap-2 border border-amber-200">
-                                <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                <span>تستخدم كمبيوتر مكتبي. للمسح الضوئي، تأكد من توفر كاميرا ويب (Webcam)، أو استخدم "إضافة يدوياً".</span>
+            if (cartData.paid) {
+                return (
+                    <div className="max-w-md mx-auto glass-card rounded-3xl shadow-xl p-8 text-center border-t-4 border-emerald-500">
+                        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <svg className="w-12 h-12 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                        </div>
+                        <h2 className="text-2xl font-extrabold text-gray-800 mb-2">تمت عملية الدفع بنجاح</h2>
+                        <p className="text-gray-500 mb-6">المبلغ المدفوع: <span className="font-bold text-emerald-600">{totalPrice.toFixed(2)} {mallInfo.currency}</span></p>
+                        {cartData.auditRequired ? (
+                            <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 mb-6">
+                                <p className="font-bold text-amber-800 mb-1">🛑 تسجيل خروج أمني إلزامي</p>
+                                <p className="text-sm text-amber-600">يرجى التوجه إلى بوابة الأمن لتدقيق السلة.</p>
+                            </div>
+                        ) : (
+                            <div className="bg-blue-50 border-2 border-blue-100 rounded-2xl p-4 mb-6">
+                                <p className="text-sm text-blue-600 mb-1">خروج مباشر</p>
                             </div>
                         )}
+                        <div className="bg-gray-900 text-white rounded-2xl p-6 mb-6">
+                            <p className="text-xs text-gray-400 mb-2">رمز الخروج (للحارس)</p>
+                            <p className="text-5xl font-bold tracking-widest text-emerald-400">{cartData.exitCode}</p>
+                        </div>
+                        <button onClick={() => updateCart({ items: [], paid: false, exitCode: null, auditRequired: false, buyer: cartData.buyer })} className="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-300 transition">
+                            إنهاء الجلسة
+                        </button>
+                    </div>
+                );
+            }
 
+            const filteredProducts = Object.keys(mallInfo.products).filter(b => mallInfo.products[b].category === activeCat);
+
+            return (
+                <div className="grid md:grid-cols-2 gap-6 max-w-6xl mx-auto">
+                    {/* قسم اليسار: المتجر */}
+                    <div className="glass-card rounded-3xl shadow-xl p-6">
+                        <h2 className="text-xl font-extrabold text-blue-900 mb-4">تصفح المنتجات</h2>
+                        <div className="flex flex-wrap gap-2 mb-6 border-b border-blue-100 pb-4">
+                            {mallInfo.categories.map(cat => (
+                                <button key={cat} onClick={() => setActiveCat(cat)} className={`px-4 py-2 rounded-xl font-bold text-sm transition ${activeCat === cat ? 'gradient-btn text-white' : 'bg-blue-50 text-blue-600'}`}>{cat}</button>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 h-[500px] overflow-y-auto scrollbar-hide pl-2">
+                            {filteredProducts.map(barcode => {
+                                const p = mallInfo.products[barcode];
+                                return (
+                                    <div key={barcode} className="product-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                        <div className="h-28 bg-gray-100 overflow-hidden">
+                                            <img src={p.image || "https://via.placeholder.com/150"} alt={p.name} className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="p-3 flex-1 flex flex-col justify-between">
+                                            <div>
+                                                <h4 className="font-bold text-gray-800 text-sm leading-tight mb-1">{p.name}</h4>
+                                                <p className="text-blue-600 font-extrabold">{p.price.toFixed(2)} {mallInfo.currency}</p>
+                                            </div>
+                                            <button onClick={() => addProduct(barcode)} className="mt-2 w-full bg-blue-100 text-blue-700 py-1 rounded-lg text-sm font-bold hover:bg-blue-200 transition">إضافة +</button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    {/* قسم اليمين: السلة */}
+                    <div className="glass-card rounded-3xl shadow-xl p-6 border-t-4 border-blue-500 flex flex-col">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-extrabold text-blue-900">سلة التسوق</h2>
-                            <div className="bg-blue-50 px-4 py-2 rounded-xl text-center">
-                                <p className="text-xs text-blue-400">الوزن</p>
-                                <p className="font-bold text-blue-800">{cartData.actualWeight} g</p>
-                            </div>
-                        </div>
-
-                        {/* أزرار الإضافة */}
-                        <div className="grid grid-cols-2 gap-3 mb-6">
-                            <button onClick={() => setShowScanner(true)} className="gradient-btn text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 shadow-lg">
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h2m12 0h2M4 12h16M4 18h2m12 0h2M6 4v16M18 4v16"></path></svg>
-                                مسح بالكاميرا
-                            </button>
-                            <button onClick={() => setShowManualSearch(true)} className="bg-white text-blue-700 border-2 border-blue-100 py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 hover:bg-blue-50 transition">
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                                إضافة يدوياً
+                            <button onClick={() => setShowScanner(true)} className="gradient-btn text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h2m12 0h2M4 12h16M4 18h2m12 0h2M6 4v16M18 4v16"></path></svg>
+                                مسح QR
                             </button>
                         </div>
 
-                        <div className="bg-blue-50/50 rounded-2xl p-4 h-64 overflow-y-auto scrollbar-hide mb-6 border border-blue-100">
-                            {cartData.items.length === 0 ? <div className="h-full flex items-center justify-center text-blue-300">السلة فارغة</div> : 
+                        <div className="bg-blue-50/50 rounded-2xl p-4 flex-1 h-64 overflow-y-auto scrollbar-hide mb-6 border border-blue-100">
+                            {cartData.items.length === 0 ? <div className="h-full flex items-center justify-center text-blue-300 text-center">سلتك فارغة.<br/>أضف منتجات من القسم اليسار أو امسح الباركود.</div> : 
                                 cartData.items.map(item => (
-                                    <div key={item.barcode} className="flex justify-between items-center bg-white p-3 mb-2 rounded-xl shadow-sm">
-                                        <div><p className="font-bold text-gray-800">{item.name}</p><p className="text-xs text-gray-500">{item.price.toFixed(2)} {mallInfo.currency} | {item.weight}g × {item.qty}</p></div>
-                                        <button onClick={() => removeItem(item.barcode)} className="text-red-400 hover:bg-red-50 p-2 rounded-full"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                                    <div key={item.barcode} className="flex justify-between items-center bg-white p-2 mb-2 rounded-xl shadow-sm">
+                                        <div className="flex items-center gap-2">
+                                            <img src={item.image} className="w-12 h-12 rounded-lg object-cover" alt={item.name} />
+                                            <div><p className="font-bold text-gray-800 text-sm">{item.name}</p><p className="text-xs text-gray-500">{item.price.toFixed(2)} {mallInfo.currency} × {item.qty}</p></div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-blue-600">{(item.price * item.qty).toFixed(2)}</span>
+                                            <button onClick={() => removeItem(item.barcode)} className="text-red-400 hover:bg-red-50 p-1 rounded-full"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                                        </div>
                                     </div>
                                 ))
                             }
                         </div>
 
-                        <div className="flex justify-between items-center border-t-2 border-blue-100 pt-4">
-                            <div><p className="text-sm text-blue-500">الإجمالي</p><p className="text-4xl font-extrabold text-blue-700">{totalPrice.toFixed(2)} <span className="text-lg">{mallInfo.currency}</span></p></div>
-                            <button onClick={sendToCashier} disabled={theftAlert || cartData.items.length === 0} className={`px-8 py-3 rounded-xl font-bold text-white transition ${theftAlert || cartData.items.length === 0 ? 'bg-gray-300 cursor-not-allowed' : 'gradient-btn shadow-lg'}`}>
-                                إرسال للكاشير
-                            </button>
+                        <div className="border-t-2 border-blue-100 pt-4">
+                            <div className="flex justify-between items-center mb-4">
+                                <div><p className="text-sm text-blue-500">الإجمالي</p><p className="text-3xl font-extrabold text-blue-700">{totalPrice.toFixed(2)} <span className="text-lg">{mallInfo.currency}</span></p></div>
+                                <button onClick={processPayment} disabled={cartData.items.length === 0} className={`px-8 py-3 rounded-xl font-bold text-white transition ${cartData.items.length === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-600 shadow-lg'}`}>الدفع الآن</button>
+                            </div>
                         </div>
                     </div>
 
-                    {/* نافذة المسح بالكاميرا */}
                     {showScanner && (
                         <div className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl p-4 w-full max-w-md relative">
-                                <h3 className="font-bold text-lg mb-4 text-center text-blue-900">وجّه الكاميرا للباركود</h3>
-                                {cameraError ? (
-                                    <div className="bg-red-50 text-red-600 p-4 rounded-xl text-center text-sm border border-red-200 mb-4">{cameraError}</div>
-                                ) : (
-                                    <>
-                                        <video id="scanner-video" ref={videoRef} muted playsInline className="w-full bg-gray-900 aspect-video"></video>
-                                        <canvas ref={canvasRef} id="scanner-canvas"></canvas>
-                                        <div className="mt-2 text-center text-xs text-gray-400">جاري البحث عن الباركود...</div>
-                                    </>
-                                )}
-                                <button onClick={() => setShowScanner(false)} className="mt-4 w-full bg-blue-100 py-3 rounded-xl font-bold text-blue-800 hover:bg-blue-200 transition">إغلاق</button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* نافذة البحث والإضافة اليدوية */}
-                    {showManualSearch && (
-                        <div className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl p-4 w-full max-w-md max-h-[85vh] flex flex-col">
-                                <h3 className="font-bold text-lg mb-4 text-center text-blue-900">إضافة منتج يدوياً</h3>
-                                <input 
-                                    type="text" 
-                                    placeholder="ابحث باسم المنتج..." 
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-                                    autoFocus
-                                />
-                                <div className="flex-1 overflow-y-auto scrollbar-hide space-y-2">
-                                    {filteredManualProducts.length === 0 ? (
-                                        <div className="text-center text-gray-400 py-8">لا توجد منتجات مطابقة</div>
-                                    ) : (
-                                        filteredManualProducts.map(barcode => {
-                                            const p = mallInfo.products[barcode];
-                                            return (
-                                                <button 
-                                                    key={barcode} 
-                                                    onClick={() => {
-                                                        addProductToCart(barcode);
-                                                        setShowManualSearch(false);
-                                                        setSearchQuery('');
-                                                    }}
-                                                    className="w-full flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-blue-50 hover:bg-blue-50 hover:border-blue-200 transition text-right"
-                                                >
-                                                    <div>
-                                                        <p className="font-bold text-gray-800">{p.name}</p>
-                                                        <p className="text-xs text-gray-500">{p.category} - {p.weight}g</p>
-                                                    </div>
-                                                    <p className="font-bold text-blue-600">{p.price.toFixed(2)} {mallInfo.currency}</p>
-                                                </button>
-                                            )
-                                        })
-                                    )}
-                                </div>
-                                <button onClick={() => { setShowManualSearch(false); setSearchQuery(''); }} className="mt-4 w-full bg-blue-100 py-3 rounded-xl font-bold text-blue-800 hover:bg-blue-200 transition">إغلاق</button>
+                            <div className="bg-white rounded-2xl p-4 w-full max-w-md">
+                                <h3 className="font-bold text-lg mb-4 text-center">وجّه الكاميرا للباركود</h3>
+                                {cameraError ? <div className="bg-red-50 text-red-600 p-4 rounded-xl text-center text-sm mb-4">{cameraError}</div> : <video id="scanner-video" ref={videoRef} muted playsInline className="w-full bg-gray-900 aspect-video"></video>}
+                                <canvas ref={canvasRef} id="scanner-canvas"></canvas>
+                                <button onClick={() => setShowScanner(false)} className="mt-4 w-full bg-blue-100 py-3 rounded-xl font-bold text-blue-800">إغلاق</button>
                             </div>
                         </div>
                     )}
@@ -600,96 +535,95 @@
             );
         };
 
-        const CashierView = ({ mallInfo, cartData, updateCart, cloudDB, updateCloudDB }) => {
-            const expectedWeight = cartData.items.reduce((s, i) => s + i.weight * i.qty, 0);
-            const totalPrice = cartData.items.reduce((s, i) => s + i.price * i.qty, 0);
-            const theftAlert = Math.abs(cartData.actualWeight - expectedWeight) > 15 && cartData.items.length > 0;
+        // --- شاشة الأمن (Security) ---
+        const SecurityView = ({ mallInfo, cloudDB, updateCart, updateCloudDB }) => {
+            const cart = cloudDB.cart;
+            const totalPrice = cart.items.reduce((s, i) => s + i.price * i.qty, 0);
 
-            const completePayment = () => {
+            const clearCart = () => {
                 const newTransactions = [...cloudDB.transactions, {
-                    mallId: mallInfo.id, buyer: cartData.buyer, items: cartData.items, total: totalPrice, date: new Date().toISOString()
+                    mallId: mallInfo.id, buyer: cart.buyer, items: cart.items, total: totalPrice, date: new Date().toISOString(), auditRequired: cart.auditRequired
                 }];
-                updateCloudDB({ ...cloudDB, transactions: newTransactions });
-                alert("تمت عملية الدفع بنجاح! تم تحديث لوحة تحكم المالك.");
-                updateCart({ items: [], actualWeight: 0, buyer: null, status: 'active' });
+                // تحديث السحابة بالمعاملات الجديدة ثم مسح السلة
+                updateCloudDB({ ...cloudDB, transactions: newTransactions, cart: { items: [], buyer: null, paid: false, exitCode: null, auditRequired: false } });
+                alert("تم تأكيد خروج المشتري وتسجيل البيع بنجاح.");
             };
 
             return (
-                <div className="max-w-4xl mx-auto grid md:grid-cols-3 gap-6">
-                    <div className="md:col-span-2 glass-card rounded-3xl shadow-xl p-6">
-                        <h2 className="text-xl font-extrabold text-blue-900 mb-4">سلة المشتري الحالية</h2>
-                        {cartData.buyer && (
-                            <div className="bg-blue-50 p-3 rounded-xl mb-4 flex justify-between items-center border border-blue-100">
-                                <div><p className="text-xs text-blue-400">اسم المشتري</p><p className="font-bold text-blue-900">{cartData.buyer.name}</p></div>
-                                <div className="text-left"><p className="text-xs text-blue-400">رقم الهاتف</p><p className="font-bold text-blue-900">{cartData.buyer.phone}</p></div>
+                <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-6">
+                    <div className="glass-card rounded-3xl shadow-xl p-6">
+                        <h2 className="text-xl font-extrabold text-blue-900 mb-4">حالة السلة الحالية</h2>
+                        {cart.buyer ? (
+                            <div className="bg-blue-50 p-3 rounded-xl mb-4 border border-blue-100">
+                                <p className="text-sm text-gray-600">المشتري: <span className="font-bold text-blue-900">{cart.buyer.name}</span></p>
+                                <p className="text-sm text-gray-600">الهاتف: <span className="font-bold text-blue-900">{cart.buyer.phone}</span></p>
                             </div>
-                        )}
-                        <div className="bg-blue-50/50 rounded-2xl p-4 h-[300px] overflow-y-auto scrollbar-hide border border-blue-100">
-                            {cartData.items.length === 0 ? <div className="h-full flex items-center justify-center text-blue-300">بانتظار المشتري...</div> : 
-                                cartData.items.map(item => (
-                                    <div key={item.barcode} className="flex justify-between items-center bg-white p-3 mb-2 rounded-xl shadow-sm">
-                                        <div><p className="font-bold">{item.name}</p><p className="text-xs text-gray-500">الكمية: {item.qty} × الوزن: {item.weight}g</p></div>
-                                        <p className="font-bold text-blue-600">{(item.price * item.qty).toFixed(2)} {mallInfo.currency}</p>
-                                    </div>
-                                ))
-                            }
-                        </div>
+                        ) : <p className="text-gray-400 mb-4">لا توجد سلة نشطة.</p>}
+
+                        {cart.paid ? (
+                            <div className={`p-6 rounded-2xl text-center border-4 ${cart.auditRequired ? 'bg-amber-50 border-amber-400' : 'bg-emerald-50 border-emerald-400'}`}>
+                                <p className="font-bold text-lg mb-2">حالة الدفع: مدفوع ✅</p>
+                                <p className="text-sm text-gray-600 mb-4">المبلغ: {totalPrice.toFixed(2)} {mallInfo.currency}</p>
+                                <p className="text-xs text-gray-500 mb-1">رمز الخروج:</p>
+                                <p className="text-5xl font-bold tracking-widest text-blue-800 mb-4">{cart.exitCode}</p>
+                                {cart.auditRequired && <div className="bg-red-100 text-red-700 p-3 rounded-lg font-bold mb-4">⚠️ للتدقيق الأمني!</div>}
+                                <div className="max-h-40 overflow-y-auto mb-4 text-right bg-white p-3 rounded-lg">
+                                    {cart.items.map(item => (
+                                        <div key={item.barcode} className="flex justify-between text-sm border-b py-1">
+                                            <span>{item.name} × {item.qty}</span>
+                                            <span>{(item.price * item.qty).toFixed(2)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={clearCart} className="w-full bg-gray-800 text-white py-3 rounded-xl font-bold">تأكيد الخروج ومسح</button>
+                            </div>
+                        ) : <div className="text-center text-gray-400 p-12 bg-gray-50 rounded-2xl">بانتظار الدفع...</div>}
                     </div>
-                    <div className="space-y-4">
-                        <div className={`p-4 rounded-2xl shadow-lg border-t-4 glass-card ${theftAlert ? 'border-red-500 alert-pulse' : 'border-emerald-500'}`}>
-                            <h3 className="font-bold mb-2 text-blue-900">حالة الأمان</h3>
-                            <div className="text-sm space-y-1 text-blue-800">
-                                <div className="flex justify-between"><span>المسجل:</span> <span className="font-bold">{expectedWeight}g</span></div>
-                                <div className="flex justify-between"><span>الفعلي:</span> <span className="font-bold">{cartData.actualWeight}g</span></div>
-                                <div className={`font-bold mt-2 pt-2 border-t border-blue-100 ${theftAlert ? 'text-red-600' : 'text-emerald-600'}`}>{theftAlert ? 'يوجد سرقة!' : 'مطابق وآمن'}</div>
-                            </div>
-                        </div>
-                        <div className="glass-card p-4 rounded-2xl shadow-lg">
-                            <h3 className="font-bold mb-3 text-blue-900">الفاتورة</h3>
-                            <div className="flex justify-between font-extrabold text-2xl text-blue-800 border-t border-blue-100 pt-2 mb-4">
-                                <span>الإجمالي:</span><span>{totalPrice.toFixed(2)} {mallInfo.currency}</span>
-                            </div>
-                            <button onClick={completePayment} disabled={cartData.items.length === 0 || theftAlert || !cartData.buyer} className={`w-full py-3 rounded-xl font-bold text-white transition ${(cartData.items.length === 0 || theftAlert || !cartData.buyer) ? 'bg-gray-300 cursor-not-allowed' : 'gradient-btn shadow-lg'}`}>تأكيد الدفع</button>
+
+                    <div className="glass-card rounded-3xl shadow-xl p-6">
+                        <h2 className="text-xl font-extrabold text-blue-900 mb-4">سجل عمليات اليوم</h2>
+                        <div className="space-y-3 max-h-[500px] overflow-y-auto scrollbar-hide">
+                            {cloudDB.transactions.length === 0 ? <p className="text-center text-gray-400 p-8">لا توجد معاملات.</p> : cloudDB.transactions.slice().reverse().map((tx, idx) => (
+                                <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                    <div className="flex justify-between mb-2">
+                                        <span className="font-bold text-gray-800">{tx.buyer?.name}</span>
+                                        <span className="font-bold text-emerald-600">{tx.total.toFixed(2)} {mallInfo.currency}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs text-gray-500">
+                                        <span>{tx.buyer?.phone}</span>
+                                        <span>{tx.auditRequired ? '🛑 تم تدقيقها' : '✅ خروج مباشر'}</span>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
             );
         };
 
+        // --- لوحة المالك (Owner) ---
         const OwnerDashboard = ({ mallInfo, cloudDB, updateMallData }) => {
             const [activeCategory, setActiveCategory] = useState(mallInfo.categories[0] || "");
             const [showProductForm, setShowProductForm] = useState(false);
-            const [newCat, setNewCat] = useState('');
             const [confirmDel, setConfirmDel] = useState(null);
             
             const [pBarcode, setPBarcode] = useState('');
             const [pName, setPName] = useState('');
             const [pPrice, setPPrice] = useState('');
-            const [pWeight, setPWeight] = useState('');
             const [pCategory, setPCategory] = useState(mallInfo.categories[0] || "");
+            const [pImage, setPImage] = useState('');
 
             const transactions = cloudDB.transactions.filter(tx => tx.mallId === mallInfo.id).reverse();
             const totalRevenue = transactions.reduce((s, t) => s + t.total, 0);
 
-            useEffect(() => {
-                if (!mallInfo.categories.includes(activeCategory)) setActiveCategory(mallInfo.categories[0] || "");
-            }, [mallInfo.categories]);
-
-            const addCategory = (e) => {
-                e.preventDefault();
-                if (!newCat) return;
-                if (mallInfo.categories.includes(newCat)) { alert("القسم موجود مسبقاً"); return; }
-                updateMallData(mallInfo.id, { ...mallInfo, categories: [...mallInfo.categories, newCat] });
-                setNewCat('');
-                setActiveCategory(newCat);
-            };
+            useEffect(() => { if (!mallInfo.categories.includes(activeCategory)) setActiveCategory(mallInfo.categories[0] || ""); }, [mallInfo.categories]);
 
             const addProduct = (e) => {
                 e.preventDefault();
-                if (mallInfo.products[pBarcode]) { alert("هذا الباركود مسجل لمنتج آخر!"); return; }
-                const newProduct = { name: pName, price: parseFloat(pPrice), weight: parseInt(pWeight), category: pCategory };
+                if (mallInfo.products[pBarcode]) { alert("هذا الباركود مسجل!"); return; }
+                const newProduct = { name: pName, price: parseFloat(pPrice), category: pCategory, image: pImage };
                 updateMallData(mallInfo.id, { ...mallInfo, products: { ...mallInfo.products, [pBarcode]: newProduct } });
-                setPBarcode(''); setPName(''); setPPrice(''); setPWeight('');
+                setPBarcode(''); setPName(''); setPPrice(''); setPImage('');
                 setShowProductForm(false);
             };
 
@@ -700,7 +634,7 @@
                 setConfirmDel(null);
             };
 
-            const filteredProducts = Object.keys(mallInfo.products).filter(barcode => mallInfo.products[barcode].category === activeCategory);
+            const filteredProducts = Object.keys(mallInfo.products).filter(b => mallInfo.products[b].category === activeCategory);
 
             return (
                 <div className="max-w-6xl mx-auto space-y-8">
@@ -720,49 +654,40 @@
                     </div>
 
                     <div className="glass-card rounded-3xl shadow-xl p-6">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                            <div>
-                                <h2 className="text-2xl font-extrabold text-blue-900">إدارة الأقسام والمنتجات</h2>
-                                <p className="text-sm text-gray-500 mt-1">نظم منتجاتك عبر الأقسام لتسهيل الوصول إليها</p>
-                            </div>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-extrabold text-blue-900">إدارة المنتجات</h2>
                             <button onClick={() => setShowProductForm(!showProductForm)} className="gradient-btn text-white px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                                إضافة منتج جديد
+                                إضافة منتج
                             </button>
                         </div>
 
-                        <form onSubmit={addCategory} className="flex gap-2 mb-6 p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
-                            <input type="text" value={newCat} onChange={e=>setNewCat(e.target.value)} placeholder="إضافة قسم جديد (مثال: منظفات)" className="w-full px-4 py-2 bg-white rounded-xl outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500" required />
-                            <button type="submit" className="bg-blue-800 text-white px-6 py-2 rounded-xl font-bold text-sm whitespace-nowrap">إضافة القسم</button>
-                        </form>
-
                         {showProductForm && (
-                            <form onSubmit={addProduct} className="bg-white p-6 rounded-2xl mb-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-2 border-blue-200 shadow-md transition-all">
-                                <h3 className="md:col-span-2 text-lg font-bold text-blue-900 border-b pb-2 mb-2">تفاصيل المنتج الجديد</h3>
+                            <form onSubmit={addProduct} className="bg-white p-6 rounded-2xl mb-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-2 border-blue-200">
+                                <div className="md:col-span-2 text-lg font-bold text-blue-900 border-b pb-2 mb-2">تفاصيل المنتج الجديد</div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 mb-1">الباركود</label>
-                                    <input type="text" value={pBarcode} onChange={e=>setPBarcode(e.target.value)} placeholder="6281234567890" className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500" required />
+                                    <input type="text" value={pBarcode} onChange={e=>setPBarcode(e.target.value)} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none" required />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 mb-1">اسم المنتج</label>
-                                    <input type="text" value={pName} onChange={e=>setPName(e.target.value)} placeholder="اسم المنتج" className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500" required />
+                                    <input type="text" value={pName} onChange={e=>setPName(e.target.value)} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none" required />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1">السعر (شيكل)</label>
-                                    <input type="number" step="0.1" value={pPrice} onChange={e=>setPPrice(e.target.value)} placeholder="2.50" className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500" required />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1">الوزن (جرام)</label>
-                                    <input type="number" value={pWeight} onChange={e=>setPWeight(e.target.value)} placeholder="500" className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500" required />
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">السعر</label>
+                                    <input type="number" step="0.1" value={pPrice} onChange={e=>setPPrice(e.target.value)} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none" required />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 mb-1">القسم</label>
-                                    <select value={pCategory} onChange={e=>setPCategory(e.target.value)} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none border border-blue-100 focus:ring-2 focus:ring-blue-500">
-                                        {mallInfo.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                    </select>
+                                    <input type="text" value={pCategory} onChange={e=>setPCategory(e.target.value)} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none" required />
                                 </div>
-                                <div className="md:col-span-2 flex gap-2 mt-2">
-                                    <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">حفظ المنتج</button>
+                                <div className="md:col-span-2">
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">صورة المنتج</label>
+                                    <input type="file" accept="image/*" onChange={e => resizeImage(e.target.files[0], 100, (uri) => setPImage(uri))} className="w-full px-4 py-2 bg-blue-50 rounded-lg outline-none" required />
+                                    {pImage && <img src={pImage} alt="preview" className="mt-2 w-20 h-20 rounded-lg object-cover" />}
+                                </div>
+                                <div className="md:col-span-2 flex gap-2">
+                                    <button type="submit" className="w-full gradient-btn text-white py-3 rounded-xl font-bold">حفظ</button>
                                     <button type="button" onClick={() => setShowProductForm(false)} className="bg-gray-200 text-gray-700 px-6 py-3 rounded-xl font-bold">إلغاء</button>
                                 </div>
                             </form>
@@ -770,80 +695,33 @@
 
                         <div className="flex flex-wrap gap-2 mb-6 border-b border-blue-100 pb-4">
                             {mallInfo.categories.map(cat => (
-                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-5 py-2 rounded-xl font-bold text-sm transition-all ${activeCategory === cat ? 'gradient-btn text-white shadow-lg scale-105' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>{cat}</button>
+                                <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-5 py-2 rounded-xl font-bold text-sm transition ${activeCategory === cat ? 'gradient-btn text-white shadow-lg' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}>{cat}</button>
                             ))}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filteredProducts.length === 0 ? (
-                                <div className="col-span-full text-center p-12 text-blue-300 bg-blue-50/50 rounded-2xl border border-dashed border-blue-200">لا توجد منتجات في قسم "{activeCategory}" بعد.</div>
-                            ) : (
-                                filteredProducts.map(barcode => {
-                                    const p = mallInfo.products[barcode];
-                                    return (
-                                        <div key={barcode} className="bg-white p-5 rounded-2xl shadow-sm border border-blue-50 flex flex-col justify-between transition hover:shadow-md hover:border-blue-200">
-                                            <div>
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <h4 className="font-bold text-blue-900 text-lg">{p.name}</h4>
-                                                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">{p.category}</span>
-                                                </div>
-                                                <p className="text-xs text-gray-400 font-mono mb-4 break-all">{barcode}</p>
-                                                <div className="flex justify-between text-sm mb-1 border-t border-gray-50 pt-2">
-                                                    <span className="text-gray-500">السعر:</span>
-                                                    <span className="font-bold text-emerald-600">{p.price.toFixed(2)} {mallInfo.currency}</span>
-                                                </div>
-                                                <div className="flex justify-between text-sm">
-                                                    <span className="text-gray-500">الوزن:</span>
-                                                    <span className="font-bold text-gray-700">{p.weight} g</span>
-                                                </div>
-                                            </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {filteredProducts.map(barcode => {
+                                const p = mallInfo.products[barcode];
+                                return (
+                                    <div key={barcode} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                        <div className="h-32 bg-gray-100">
+                                            <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="p-4">
+                                            <h4 className="font-bold text-blue-900">{p.name}</h4>
+                                            <p className="text-emerald-600 font-bold mb-3">{p.price.toFixed(2)} {mallInfo.currency}</p>
                                             {confirmDel === barcode ? (
-                                                <div className="mt-4 flex gap-2">
-                                                    <button onClick={() => executeDelete(barcode)} className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-bold transition">تأكيد الحذف</button>
-                                                    <button onClick={() => setConfirmDel(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold transition">تراجع</button>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => executeDelete(barcode)} className="flex-1 bg-red-500 text-white py-1 rounded-lg text-xs font-bold">تأكيد</button>
+                                                    <button onClick={() => setConfirmDel(null)} className="flex-1 bg-gray-200 py-1 rounded-lg text-xs font-bold">إلغاء</button>
                                                 </div>
                                             ) : (
-                                                <button onClick={() => setConfirmDel(barcode)} className="mt-4 w-full text-red-500 hover:bg-red-50 py-2 rounded-lg text-sm font-bold transition flex items-center justify-center gap-1 border border-red-100">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                    حذف
-                                                </button>
+                                                <button onClick={() => setConfirmDel(barcode)} className="w-full text-red-500 border border-red-100 py-1 rounded-lg text-xs font-bold">حذف</button>
                                             )}
                                         </div>
-                                    )
-                                })
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="glass-card rounded-3xl shadow-xl p-6">
-                        <h2 className="text-xl font-extrabold text-blue-900 mb-4">سجل عمليات الشراء</h2>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-right border-collapse">
-                                <thead>
-                                    <tr className="border-b-2 border-blue-100 text-blue-800">
-                                        <th className="p-3 text-sm">اسم المشتري</th>
-                                        <th className="p-3 text-sm">رقم الهاتف</th>
-                                        <th className="p-3 text-sm">عدد الأغراض</th>
-                                        <th className="p-3 text-sm">المبلغ</th>
-                                        <th className="p-3 text-sm">التوقيت</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {transactions.length === 0 ? (
-                                        <tr><td colSpan="5" className="text-center p-8 text-blue-300">لا توجد مبيعات مسجلة.</td></tr>
-                                    ) : (
-                                        transactions.map((tx, idx) => (
-                                            <tr key={idx} className="border-b border-blue-50 hover:bg-blue-50/50 transition">
-                                                <td className="p-3 font-bold text-blue-900">{tx.buyer?.name || '-'}</td>
-                                                <td className="p-3 text-gray-600">{tx.buyer?.phone || '-'}</td>
-                                                <td className="p-3 text-gray-600">{tx.items.reduce((s,i)=>s+i.qty,0)} قطعة</td>
-                                                <td className="p-3 font-bold text-emerald-600">{tx.total.toFixed(2)} {mallInfo.currency}</td>
-                                                <td className="p-3 text-xs text-gray-400">{new Date(tx.date).toLocaleString('ar-EG')}</td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
+                                    </div>
+                                )
+                            })}
                         </div>
                     </div>
                 </div>
